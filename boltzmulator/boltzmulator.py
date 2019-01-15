@@ -129,11 +129,58 @@ class boltzmulator(object):
         self.trained=True
         return
 
-    def predict(self, parameters):
+    def predict(self, params):
         """
         Predict the power spectrum at a set of cosmological parameters.
+
+        Args:
+            params (float or array-like): parameters of the requested 
+                power spectra
+
+        Returns:
+            (array-like): length (Nz x Nk) 1D array with the predicted
+                power spectra for the requested cosmology
+
+
         """
-        
+
+        if not self.trained:
+            raise Exception("Need to train the emulator first.")
+
+        params = np.atleast_1d(params)
+        if params.ndim > 1:
+            raise Exception("'params' must be a single point in parameter "+
+                            "space; a 1D array at most.")
+        if len(params) != self.Npars:
+            raise Exception("length of 'params' does not match training "+\
+                            "parameters.")
+        #For higher dimensional trianing data, george requires a 2D array...
+        if len(params) > 1:
+            params = np.atleast_2d(params)
+
+        #Loop over d GPs and predict weights
+        wp = np.array([gp.predict(ws, params)[0] for ws, gp in zip(self.ws, self.gplist)])
+        #Multiply by the principle componentss to get predicted lnk2p
+        lnk2p_pred = wp[0]*self.phis[0]
+        for i in range(1, self.NPC):
+            lnk2p_pred += wp[i]*self.phis[i]
+
+        #Multiply on the stddev and add on the mean
+        lnk2p_pred = lnk2p_pred *self.lnk2p_std + self.lnk2p_mean
+        k2p_pred = np.exp(lnk2p_pred)
+        k = self.k
+        zs = self.redshifts
+        Nk = len(k)
+        Nz = len(zs)
+        P_pred = k2p_pred
+        #Multiply each P(k) by k^2, but note the shapes
+        #of the power spectra array we have to deal with
+        for i in range(Nz):
+            lo = i*Nk
+            hi = (i+1)*Nk
+            P_pred[lo:hi] /= k**2
+        return P_pred
+
 if __name__ == "__main__":
     params = [[0], [1]]
     k = [2, 3]
@@ -141,3 +188,4 @@ if __name__ == "__main__":
     P = [[6, 7, 8, 9], [10, 11, 12, 13]]
     b = boltzmulator(params, k, z, P)
     b.train()
+    print(b.predict([0.5]))
